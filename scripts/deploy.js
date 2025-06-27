@@ -62,6 +62,43 @@ async function deployInterchainTokenService(
     return service;
 }
 
+async function deployHyperliquidInterchainTokenService(
+    wallet,
+    create3DeployerAddress,
+    tokenManagerDeployerAddress,
+    interchainTokenDeployerAddress,
+    gatewayAddress,
+    gasServiceAddress,
+    interchainTokenFactoryAddress,
+    tokenManagerAddress,
+    tokenHandlerAddress,
+    chainName,
+    itsHubAddress,
+    evmChains = [],
+    deploymentKey,
+    ownerAddress = wallet.address,
+    operatorAddress = wallet.address,
+) {
+    const implementation = await deployContract(wallet, 'HyperliquidInterchainTokenService', [
+        tokenManagerDeployerAddress,
+        interchainTokenDeployerAddress,
+        gatewayAddress,
+        gasServiceAddress,
+        interchainTokenFactoryAddress,
+        chainName,
+        itsHubAddress,
+        tokenManagerAddress,
+        tokenHandlerAddress,
+    ]);
+    const proxy = await create3DeployContract(create3DeployerAddress, wallet, Proxy, deploymentKey, [
+        implementation.address,
+        ownerAddress,
+        defaultAbiCoder.encode(['address', 'string', 'string[]'], [operatorAddress, chainName, evmChains]),
+    ]);
+    const service = new Contract(proxy.address, implementation.interface, wallet);
+    return service;
+}
+
 async function deployInterchainTokenFactory(wallet, create3DeployerAddress, interchainTokenServiceAddress, deploymentKey) {
     const implementation = await deployContract(wallet, 'InterchainTokenFactory', [interchainTokenServiceAddress]);
     const proxy = await create3DeployContract(create3DeployerAddress, wallet, Proxy, deploymentKey, [
@@ -89,14 +126,30 @@ async function deployAll(
 
     const interchainTokenServiceAddress = await getCreate3Address(create3Deployer.address, wallet, deploymentKey);
     const tokenManagerDeployer = await deployContract(wallet, 'TokenManagerDeployer', []);
-    const interchainToken = await deployContract(wallet, 'InterchainToken', [interchainTokenServiceAddress]);
-    const interchainTokenDeployer = await deployContract(wallet, 'InterchainTokenDeployer', [interchainToken.address]);
+
+    // Determine if this is a Hyperliquid chain
+    const isHyperliquidChain = chainName.toLowerCase().includes('hyperliquid');
+
+    // Deploy only the appropriate token implementation based on chain type
+    let interchainToken, hyperliquidInterchainToken, interchainTokenDeployer;
+
+    if (isHyperliquidChain) {
+        hyperliquidInterchainToken = await deployContract(wallet, 'HyperliquidInterchainToken', [interchainTokenServiceAddress]);
+        interchainTokenDeployer = await deployContract(wallet, 'InterchainTokenDeployer', [hyperliquidInterchainToken.address]);
+    } else {
+        interchainToken = await deployContract(wallet, 'InterchainToken', [interchainTokenServiceAddress]);
+        interchainTokenDeployer = await deployContract(wallet, 'InterchainTokenDeployer', [interchainToken.address]);
+    }
+
     const tokenManager = await deployContract(wallet, 'TokenManager', [interchainTokenServiceAddress]);
     const tokenHandler = await deployContract(wallet, 'TokenHandler', []);
 
     const interchainTokenFactoryAddress = await getCreate3Address(create3Deployer.address, wallet, factoryDeploymentKey);
 
-    const service = await deployInterchainTokenService(
+    // Choose the appropriate service based on chain
+    const deployerFn = isHyperliquidChain ? deployHyperliquidInterchainTokenService : deployInterchainTokenService;
+
+    const service = await deployerFn(
         wallet,
         create3Deployer.address,
         tokenManagerDeployer.address,
@@ -127,6 +180,7 @@ async function deployAll(
         create3Deployer,
         tokenManagerDeployer,
         interchainToken,
+        hyperliquidInterchainToken,
         interchainTokenDeployer,
         tokenManager,
         tokenHandler,
@@ -138,6 +192,7 @@ module.exports = {
     deployMockGateway,
     deployGasService,
     deployInterchainTokenService,
+    deployHyperliquidInterchainTokenService,
     deployInterchainTokenFactory,
     deployAll,
 };
