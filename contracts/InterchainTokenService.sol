@@ -431,7 +431,6 @@ contract InterchainTokenService is
         return _contractCallValue(payload);
     }
 
-    /**
      * @notice Executes the cross-chain ITS message.
      * @param commandId The unique message id.
      * @param sourceChain The chain where the transaction originates from.
